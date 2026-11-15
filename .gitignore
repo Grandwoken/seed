@@ -1,0 +1,13 @@
+# ข้อมูลส่วนตัว — ห้ามขึ้น GitHub (repo เป็น public)
+plan.md
+inbox/
+*.backup.json
+seed-backup-*.json
+# กฎของ Claude มีข้อมูลเจ้าของ (วันเริ่มลงทุน อายุ ชั้นเรียน กลุ่มไลน์) + คำสั่ง agent ใช้ในคอมนี้เท่านั้น
+CLAUDE.md
+.claude/
+
+# ของเครื่องนี้
+node_modules/
+Thumbs.db
+.DS_Store

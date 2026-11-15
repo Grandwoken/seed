@@ -1,0 +1,15 @@
+{
+  "name": "seed",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SEED — แอพการเงินส่วนตัว (PWA) + agent สรุปข่าว/บทเรียน",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build:content": "node scripts/build-content.mjs",
+    "serve": "node scripts/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
