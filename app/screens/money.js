@@ -178,6 +178,11 @@ export default {
       ${summaryCard(app, ym)}
       ${budgetsCard(app, ym)}
       ${walletTiles(app)}
+      <a class="tile row between" href="#/wealth" id="m-wealth" style="min-height:56px">
+        <span class="stack" style="gap:2px"><span>ทรัพย์สินและหนี้</span>
+          <span class="small muted">ทรัพย์สินสุทธิ เงินลงทุน บัตรเครดิต เงินผ่อน</span></span>
+        <span class="chev" aria-hidden="true">›</span>
+      </a>
       ${listCard(app, ym)}
       <a class="btn" href="#/add?type=out">${icon('plus', 20, 2)}จดรายการ</a>
     </div>`;

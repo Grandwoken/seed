@@ -50,6 +50,9 @@ export function defaultState(today = todayISO()) {
     sim: { initial: null, monthly: null, years: 6, fee: 0.5, rates: { bad: -5, mid: 6, good: 12 } },
     learn: { done: [], quiz: {} },
     news: { seen: [] },
+    debts: [], // { id, name, kind: card|loan|other, balance, rate (%/ปี), minPay, dueDay }
+    assets: [], // { id, name, kind: invest|other, value, currency: THB|USD, updatedAt } — พิมพ์มูลค่าเอง (ไม่ดึงราคาสด)
+    netWorthLog: [], // { ym, total } เดือนละค่า
   };
 }
 
@@ -77,6 +80,9 @@ export function migrate(input, today = todayISO()) {
     learn: cleanLearn(o.learn),
     news: cleanNews(o.news),
     allocation: validAllocation(o.allocation) ? pickAllocation(o.allocation) : null,
+    debts: arr(o.debts, []).filter(validDebt).map(cleanDebt),
+    assets: arr(o.assets, []).filter(validAsset).map(cleanAsset),
+    netWorthLog: arr(o.netWorthLog, []).filter((x) => x && /^\d{4}-\d{2}$/.test(x.ym) && Number.isFinite(x.total)).slice(-NW_MAX),
   };
   if (!s.goals.some((g) => g.kind === 'emergency')) s.goals = [...s.goals, clone(d.goals[1])];
   return s;
@@ -417,5 +423,132 @@ export function markNewsSeen(state, date) {
   const s = clone(state);
   if (!realDate(date) || s.news.seen.includes(date)) return s;
   s.news.seen = [...s.news.seen, date].slice(-NEWS_SEEN_MAX);
+  return s;
+}
+
+// ---------- หนี้ / ทรัพย์สิน (คืน { ok, state } หรือ { ok:false, error }) ----------
+
+const NW_MAX = 120; // เก็บทรัพย์สินสุทธิย้อนหลังได้ 10 ปี
+const DEBT_KINDS = ['card', 'loan', 'other'];
+const ASSET_KINDS = ['invest', 'other'];
+/** หมวดรายจ่ายที่ใช้ตอนกด "จ่ายหนี้" (เพิ่มให้เองครั้งแรกที่ใช้) */
+export const DEBT_CATEGORY = { id: 'debt_pay', name: 'จ่ายหนี้', type: 'out', budget: 0, short: 'หนี้', color: COLORS.gray };
+
+const num = (x) => typeof x === 'number' && Number.isFinite(x);
+const itemName = (n) => String(n ?? '').trim().slice(0, 40);
+function validDebt(d) { return Boolean(d) && str(d.id) && str(d.name) && money(d.balance); }
+function cleanDebt(d) {
+  return {
+    id: d.id, name: d.name, kind: DEBT_KINDS.includes(d.kind) ? d.kind : 'other', balance: round2(d.balance),
+    rate: num(d.rate) && d.rate >= 0 && d.rate <= 100 ? d.rate : 0,
+    minPay: money(d.minPay) ? round2(d.minPay) : 0,
+    dueDay: Number.isInteger(d.dueDay) && d.dueDay >= 1 && d.dueDay <= 31 ? d.dueDay : null,
+  };
+}
+function validAsset(a) { return Boolean(a) && str(a.id) && str(a.name) && money(a.value); }
+function cleanAsset(a) {
+  return {
+    id: a.id, name: a.name, kind: ASSET_KINDS.includes(a.kind) ? a.kind : 'other', value: round2(a.value),
+    currency: a.currency === 'USD' ? 'USD' : 'THB', updatedAt: realDate(a.updatedAt) ? a.updatedAt : null,
+  };
+}
+
+/** ตรวจค่าที่พิมพ์มา ('' = ใช้ได้) */
+function debtProblem(d) {
+  if (!str(d.name)) return 'ใส่ชื่อก่อน';
+  if (!money(d.balance)) return 'ยอดหนี้ต้องเป็นตัวเลข 0 ขึ้นไป';
+  if (d.rate != null && !(num(d.rate) && d.rate >= 0 && d.rate <= 100)) return 'ดอกเบี้ยต้องอยู่ระหว่าง 0–100% ต่อปี';
+  if (d.minPay != null && !money(d.minPay)) return 'ค่างวดต้องเป็นตัวเลข 0 ขึ้นไป';
+  if (d.dueDay != null && !(Number.isInteger(d.dueDay) && d.dueDay >= 1 && d.dueDay <= 31)) return 'วันครบกำหนดต้องเป็นวันที่ 1–31';
+  return '';
+}
+
+export function addDebt(state, { name, kind = 'other', balance, rate = 0, minPay = 0, dueDay = null }) {
+  const d = { id: uid('d'), name: itemName(name), kind, balance, rate, minPay, dueDay };
+  const why = debtProblem(d);
+  if (why) return { ok: false, error: why };
+  const s = clone(state);
+  s.debts.push(cleanDebt(d));
+  return { ok: true, state: s };
+}
+
+export function updateDebt(state, id, patch) {
+  const cur = state.debts.find((d) => d.id === id);
+  if (!cur) return { ok: false, error: 'ไม่พบหนี้นี้' };
+  const next = { ...cur, ...patch, id, name: itemName(patch.name ?? cur.name) };
+  const why = debtProblem(next);
+  if (why) return { ok: false, error: why };
+  const s = clone(state);
+  s.debts = s.debts.map((d) => (d.id === id ? cleanDebt(next) : d));
+  return { ok: true, state: s };
+}
+
+export function deleteDebt(state, id) {
+  const s = clone(state);
+  s.debts = s.debts.filter((d) => d.id !== id);
+  return s;
+}
+
+/** จ่ายหนี้: จดเป็นรายจ่ายหมวด "จ่ายหนี้" จากกระเป๋า แล้วลดยอดหนี้ */
+export function payDebt(state, { debtId, walletId, amount, date }) {
+  const fail = (error) => ({ ok: false, error });
+  const debt = state.debts.find((d) => d.id === debtId);
+  const a = round2(amount);
+  if (!debt) return fail('ไม่พบหนี้นี้');
+  if (!state.wallets.some((w) => w.id === walletId)) return fail('เลือกกระเป๋าก่อน');
+  if (!(a > 0)) return fail('ใส่จำนวนเงินมากกว่า 0');
+  if (a > debt.balance) return fail('เกินยอดหนี้ที่เหลือ');
+  if (a > walletBalance(state, walletId)) return fail('เงินในกระเป๋าไม่พอ');
+  const s = clone(state);
+  if (!s.categories.some((c) => c.id === DEBT_CATEGORY.id)) s.categories.push({ ...DEBT_CATEGORY });
+  s.transactions.push({
+    id: txId(), date, type: 'out', amount: a, categoryId: DEBT_CATEGORY.id, walletId,
+    note: `จ่ายหนี้ ${debt.name}`, recurringId: null, debtId,
+  });
+  const d = s.debts.find((x) => x.id === debtId);
+  d.balance = round2(d.balance - a);
+  return { ok: true, state: s };
+}
+
+function assetProblem(a) {
+  if (!str(a.name)) return 'ใส่ชื่อก่อน';
+  if (!money(a.value)) return 'มูลค่าต้องเป็นตัวเลข 0 ขึ้นไป';
+  if (a.currency !== 'THB' && a.currency !== 'USD') return 'สกุลเงินต้องเป็นบาทหรือดอลลาร์';
+  return '';
+}
+
+export function addAsset(state, { name, kind = 'invest', value, currency = 'THB', date }) {
+  const a = { id: uid('a'), name: itemName(name), kind, value, currency, updatedAt: date };
+  const why = assetProblem(a);
+  if (why) return { ok: false, error: why };
+  const s = clone(state);
+  s.assets.push(cleanAsset(a));
+  return { ok: true, state: s };
+}
+
+export function updateAsset(state, id, { date, ...patch }) {
+  const cur = state.assets.find((a) => a.id === id);
+  if (!cur) return { ok: false, error: 'ไม่พบรายการนี้' };
+  const next = { ...cur, ...patch, id, name: itemName(patch.name ?? cur.name), updatedAt: date || cur.updatedAt };
+  const why = assetProblem(next);
+  if (why) return { ok: false, error: why };
+  const s = clone(state);
+  s.assets = s.assets.map((a) => (a.id === id ? cleanAsset(next) : a));
+  return { ok: true, state: s };
+}
+
+export function deleteAsset(state, id) {
+  const s = clone(state);
+  s.assets = s.assets.filter((a) => a.id !== id);
+  return s;
+}
+
+/** จดทรัพย์สินสุทธิของเดือน (ทับค่าเดิมของเดือนเดียวกัน) */
+export function logNetWorth(state, ym, total) {
+  const s = clone(state);
+  const rest = s.netWorthLog.filter((x) => x.ym !== ym);
+  rest.push({ ym, total: round2(total) });
+  rest.sort((a, b) => a.ym.localeCompare(b.ym));
+  s.netWorthLog = rest.slice(-NW_MAX);
   return s;
 }

@@ -12,6 +12,7 @@ import sim from './sim.js';
 import fx from './fx.js';
 import learn from './learn.js';
 import news from './news.js';
+import wealth from './wealth.js';
 
 export const SCREENS = {
   home,
@@ -23,6 +24,7 @@ export const SCREENS = {
   'save-goal': saveGoal,
   sim,
   fx,
+  wealth,
   settings,
   welcome,
   lock,

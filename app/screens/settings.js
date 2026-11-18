@@ -7,6 +7,7 @@ import { daysBetween, walletBalance, nextOccurrence, round2 } from '../calc.js';
 import { exportBackup, addCategory, deleteCategory, deleteWallet, setAccountDate, COLORS } from '../store.js';
 import { topbar, importBackupFlow, confirmWipe, passcodePanel } from './common.js';
 import { VERSION } from '../version.js';
+import { toCSV } from '../wealth.js';
 
 const AUTOLOCK_MIN = [1, 5, 15];
 const uid = (p) => `${p}_${crypto.randomUUID().slice(0, 8)}`;
@@ -39,6 +40,8 @@ function backupCard(app) {
       <button class="btn md" data-act="export" id="bk-export">ส่งออกไฟล์</button>
       <button class="btn md raised" data-act="import" id="bk-import">นำเข้าไฟล์</button>
     </div>
+    <button class="btn md ghost" data-act="exportCsv" id="bk-csv">ส่งออกรายการเป็น CSV (เปิดใน Excel / Google Sheets)</button>
+    <p class="small muted" style="line-height:1.6">CSV ไว้ดูหรือทำสรุปในตาราง นำกลับเข้าแอพไม่ได้ ใช้ "ส่งออกไฟล์" สำหรับสำรองข้อมูล</p>
   </section>`;
 }
 
@@ -396,6 +399,12 @@ export default {
       const file = `seed-backup-${app.today}.json`;
       downloadText(file, exportBackup(app.state));
       app.commit((s) => { s.settings.lastExport = app.today; });
+      toast(`บันทึก ${file} แล้ว ดูในโฟลเดอร์ดาวน์โหลด`, 4000);
+    },
+    exportCsv(app) {
+      if (!app.state.transactions.length) { toast('ยังไม่มีรายการให้ส่งออก'); return; }
+      const file = `seed-transactions-${app.today}.csv`;
+      downloadText(file, toCSV(app.state), 'text/csv;charset=utf-8');
       toast(`บันทึก ${file} แล้ว ดูในโฟลเดอร์ดาวน์โหลด`, 4000);
     },
     import(app) { importBackupFlow(app); },
